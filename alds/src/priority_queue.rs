@@ -59,7 +59,7 @@ impl<T: Ord + Debug> PriorityQueue<T> {
 
 mod tests {
     #[test]
-    fn it_works() {
+    fn it_works_for_i32() {
         let mut pque = super::PriorityQueue::new();
         pque.push(3);
         pque.push(5);
@@ -75,6 +75,53 @@ mod tests {
         assert_eq!(pque.pop(), Some(4));
         assert_eq!(pque.pop(), Some(5));
         assert_eq!(pque.pop(), None);
+        assert_eq!(pque.pop(), None);
+    }
+
+    #[test]
+    fn it_works_for_struct_with_ord() {
+        use std::cmp::{Ordering, Reverse};
+
+        #[derive(PartialEq, Eq, Debug)]
+        struct Person {
+            name: String,
+            height: u32,
+        }
+
+        impl Ord for Person {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.height.cmp(&other.height)
+            }
+        }
+
+        impl PartialOrd for Person {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        let mut pque = super::PriorityQueue::new();
+        pque.push(Reverse(Person {
+            name: "A".to_string(),
+            height: 180,
+        }));
+        pque.push(Reverse(Person {
+            name: "B".to_string(),
+            height: 180,
+        }));
+        pque.push(Reverse(Person {
+            name: "C".to_string(),
+            height: 170,
+        }));
+        pque.push(Reverse(Person {
+            name: "D".to_string(),
+            height: 190,
+        }));
+
+        assert_eq!(pque.pop().unwrap().0.height, 190);
+        assert_eq!(pque.pop().unwrap().0.height, 180);
+        assert_eq!(pque.pop().unwrap().0.height, 180);
+        assert_eq!(pque.pop().unwrap().0.height, 170);
         assert_eq!(pque.pop(), None);
     }
 }
