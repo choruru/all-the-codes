@@ -30,4 +30,12 @@ path = "src/d3_1.rs"
 name = "d3_2"
 path = "src/d3_2.rs"
 
+[[bin]]
+name = "d4_1"
+path = "src/d4_1.rs"
+
+[[bin]]
+name = "d4_2"
+path = "src/d4_2.rs"
+
 [dependencies]
