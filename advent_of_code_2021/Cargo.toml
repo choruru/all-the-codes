@@ -46,4 +46,13 @@ path = "src/d5_1.rs"
 name = "d5_2"
 path = "src/d5_2.rs"
 
+[[bin]]
+name = "d6_1"
+path = "src/d6_1.rs"
+
+[[bin]]
+name = "d6_2"
+path = "src/d6_2.rs"
+
 [dependencies]
+cached = "0.26.2"
