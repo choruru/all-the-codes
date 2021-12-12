@@ -94,6 +94,18 @@ path = "src/d11_1.rs"
 name = "d11_2"
 path = "src/d11_2.rs"
 
+[[bin]]
+name = "d12_1"
+path = "src/d12_1.rs"
+
+[[bin]]
+name = "d12_2"
+path = "src/d12_2.rs"
+
+[[bin]]
+name = "d12_2_cached"
+path = "src/d12_2_cached.rs"
+
 [dependencies]
 cached = "0.26.2"
 maplit = "1.0.2"
