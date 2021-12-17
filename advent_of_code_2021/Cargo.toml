@@ -138,6 +138,14 @@ path = "src/d16_1.rs"
 name = "d16_2"
 path = "src/d16_2.rs"
 
+[[bin]]
+name = "d17_1"
+path = "src/d17_1.rs"
+
+[[bin]]
+name = "d17_2"
+path = "src/d17_2.rs"
+
 [dependencies]
 cached = "0.26.2"
 maplit = "1.0.2"
