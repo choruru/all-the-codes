@@ -154,6 +154,15 @@ path = "src/d20_1.rs"
 name = "d20_2"
 path = "src/d20_2.rs"
 
+[[bin]]
+name = "d21_1"
+path = "src/d21_1.rs"
+
+[[bin]]
+name = "d21_2"
+path = "src/d21_2.rs"
+
 [dependencies]
 cached = "0.26.2"
 maplit = "1.0.2"
+itertools = "0.10.3"
