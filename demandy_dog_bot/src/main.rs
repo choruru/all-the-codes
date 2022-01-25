@@ -120,7 +120,7 @@ async fn main() -> Result<()> {
         }
 
         // dog care
-        if let (9, 23) | (15, 30) = (hour, min) {
+        if let (8, 30) | (15, 30) = (hour, min) {
             spawn(send(&DOG_CARE["food"]));
         }
         if let (11, 0) | (14, 0) | (20, 0) | (23, 0) = (hour, min) {
