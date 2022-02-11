@@ -1,16 +1,21 @@
-#[macro_use]
-extern crate maplit;
-
 use anyhow::Result;
 use cached::proc_macro::cached;
 use chrono::prelude::*;
+use chrono::Utc;
+use cron_clock::{Schedule, ScheduleIteratorOwned};
 use flexi_logger::{opt_format, Duplicate, FileSpec, Logger};
-use lazy_static::lazy_static;
+use futures::future::FutureExt;
+use futures::future::Shared;
 use log::info;
 use reqwest;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
+use std::future::Future;
+use std::iter::Peekable;
+use std::process::Output;
+use std::str::FromStr;
+use std::vec;
 use tokio::spawn;
 use tokio::time::{sleep, Duration};
 
@@ -20,26 +25,95 @@ const DISCORD_WEBHOOK_KEY: &str = if cfg!(feature = "dev") {
     "DISCORD_WEBHOOK_PROD"
 };
 
+struct Job<F: Future> {
+    name: String,
+    schedule: Peekable<ScheduleIteratorOwned<FixedOffset>>,
+    future: Shared<F>,
+}
+
+impl<F: Future> Job<F> {
+    fn new(name: &str, cron_format_schedule: &str, future: Shared<F>) -> Job<F> {
+        let job = Job {
+            name: name.to_string(),
+            schedule: get_schedule_iterator(cron_format_schedule).unwrap(),
+            future: future,
+        };
+
+        let upcoming_3 = job
+            .get_upcoming_n(3)
+            .into_iter()
+            .map(|x| x.format("%Y-%m-%d %H:%M:%S (%a)").to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        info!(
+            "Created Job '{}'. The next 3 execution times are; {}.",
+            job.name, upcoming_3
+        );
+
+        job
+    }
+    fn get_upcoming_n(&self, n: usize) -> Vec<DateTime<FixedOffset>> {
+        self.schedule
+            .clone()
+            .take(n)
+            .collect::<Vec<DateTime<FixedOffset>>>()
+    }
+}
+
 #[derive(Debug)]
 struct Post {
     username: &'static str,
     content: &'static str,
 }
 
-lazy_static! {
-    static ref CHORE: HashMap<&'static str, Post> = hashmap! {
-        "laundry" => Post {username: "Chore Master Dog", content: "https://storage.googleapis.com/leonard_meme/laundry.png"},
-        "dishes" => Post {username: "Chore Master Dog", content: "https://storage.googleapis.com/leonard_meme/dish.png"},
-        "bathroom" => Post {username: "Chore Master Dog", content: "https://storage.googleapis.com/leonard_meme/bathroom.png"},
-        "payment" => Post {username: "Chore Master Dog", content: "https://storage.googleapis.com/leonard_meme/pay.png"},
-        "rest" => Post {username: "Chore Master Dog", content: "https://storage.googleapis.com/leonard_meme/potty.png"},
-    };
-    static ref DOG_CARE: HashMap<&'static str, Post> = hashmap! {
-        "food" => Post {username: "Hungry Dog", content: "https://storage.googleapis.com/leonard_meme/food.png"},
-        "potty" => Post {username: "Poopy Dog", content: "https://storage.googleapis.com/leonard_meme/potty.png"},
-        "shower" => Post {username: "Smelly Dog", content: "https://storage.googleapis.com/leonard_meme/shower.png"},
-        "play" => Post {username: "Lonely Dog", content: "https://storage.googleapis.com/leonard_meme/play.png"},
-    };
+enum Chore {
+    Laundry,
+    Dishes,
+    Bathroom,
+    Payment,
+    Rest,
+}
+
+impl Chore {
+    fn get_post(&self) -> Post {
+        let content = match self {
+            Chore::Laundry => "https://storage.googleapis.com/leonard_meme/laundry.png",
+            Chore::Dishes => "https://storage.googleapis.com/leonard_meme/dish.png",
+            Chore::Bathroom => "https://storage.googleapis.com/leonard_meme/dish.png",
+            Chore::Payment => "https://storage.googleapis.com/leonard_meme/pay.png",
+            Chore::Rest => "https://storage.googleapis.com/leonard_meme/rest.png",
+        };
+
+        Post {
+            username: "Chore Master Dog",
+            content: content,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum DogCare {
+    Food,
+    Potty,
+    Shower,
+    Play,
+}
+
+impl DogCare {
+    fn get_post(&self) -> Post {
+        let content = match self {
+            DogCare::Food => "https://storage.googleapis.com/leonard_meme/food.png",
+            DogCare::Potty => "https://storage.googleapis.com/leonard_meme/potty.png",
+            DogCare::Shower => "https://storage.googleapis.com/leonard_meme/shower.png",
+            DogCare::Play => "https://storage.googleapis.com/leonard_meme/play.png",
+        };
+
+        Post {
+            username: "Demandy Dog",
+            content: content,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -62,29 +136,79 @@ async fn get_discord_webhook_url() -> Result<String> {
     Ok(String::from_utf8(base64::decode(&body.payload["data"])?)?)
 }
 
-async fn send(post: &Post) -> Result<()> {
+async fn send(post: Post) -> () {
     info!("Submitting {:?}...", post);
     reqwest::Client::new()
-        .post(get_discord_webhook_url().await?)
+        .post(get_discord_webhook_url().await.unwrap())
         .form(&[("username", post.username), ("content", post.content)])
         .send()
-        .await?;
-    Ok(())
+        .await
+        .unwrap();
+    ()
 }
 
-async fn daily_chore_alert(weekday: Weekday) -> Result<()> {
-    let post = match weekday {
-        Weekday::Mon => &CHORE["dishes"],
-        Weekday::Tue => &CHORE["laundry"],
-        Weekday::Wed => &CHORE["dishes"],
-        Weekday::Thu => &CHORE["laundry"],
-        Weekday::Fri => &CHORE["dishes"],
-        Weekday::Sat => &CHORE["laundry"],
-        Weekday::Sun => &CHORE["rest"],
-    };
+fn get_schedule_iterator(
+    cron_format_str: &str,
+) -> Result<Peekable<ScheduleIteratorOwned<FixedOffset>>> {
+    // Example
+    // sec  min   hour   day of month   month   day of week   year
+    // "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
+    let shed = Schedule::from_str(cron_format_str)?
+        .upcoming_owned(FixedOffset::west(6 * 3600))
+        .peekable();
 
-    send(post).await?;
-    Ok(())
+    Ok(shed)
+}
+
+fn define_jobs() -> Result<Vec<Job<impl Future<Output = ()>>>> {
+    let mut daily_chore = vec![
+        Job::new(
+            "Dishes",
+            "0 0 21 * * Mon,Wed,Fri *",
+            send(Chore::Dishes.get_post()).shared(),
+        ),
+        Job::new(
+            "Laundry",
+            "0 0 21 * * Tue,Thu,Sat *",
+            send(Chore::Laundry.get_post()).shared(),
+        ),
+        Job::new(
+            "Rest",
+            "0 0 21 * * Sun *",
+            send(Chore::Rest.get_post()).shared(),
+        ),
+    ];
+
+    let mut other_chore = vec![Job::new(
+        "Payment",
+        "0 0 10,15,20 26-28 * * *",
+        send(Chore::Payment.get_post()).shared(),
+    )];
+
+    let mut dog_cares = vec![
+        Job::new(
+            "Dog Food",
+            "0 30 8,15 * * * *",
+            send(DogCare::Food.get_post()).shared(),
+        ),
+        Job::new(
+            "Dog Potty",
+            "0 0 11,14,20 * * * *",
+            send(DogCare::Potty.get_post()).shared(),
+        ),
+        Job::new(
+            "Dog Play",
+            "0 0 17 * * * *",
+            send(DogCare::Play.get_post()).shared(),
+        ),
+    ];
+
+    let mut jobs = vec![];
+    jobs.append(&mut daily_chore);
+    jobs.append(&mut other_chore);
+    jobs.append(&mut dog_cares);
+
+    Ok(jobs)
 }
 
 #[tokio::main]
@@ -98,36 +222,19 @@ async fn main() -> Result<()> {
     // let it cache
     let _ = get_discord_webhook_url().await?;
 
+    let mut jobs = define_jobs()?;
+    let offset = FixedOffset::west(6 * 3600);
     loop {
-        let now = FixedOffset::west(6 * 3600).from_utc_datetime(&Utc::now().naive_utc());
+        let now = offset.from_utc_datetime(&Utc::now().naive_utc());
         info!("Woke up at {}", now);
-        let (weekday, month, day, hour, min) = (
-            now.weekday(),
-            now.month(),
-            now.day(),
-            now.hour(),
-            now.minute(),
-        );
 
-        // chore
-        if let (21, 0) = (hour, min) {
-            spawn(daily_chore_alert(weekday));
-        }
-        if let 26..=28 = day {
-            if let (10, 0) | (15, 0) | (20, 0) = (hour, min) {
-                spawn(send(&CHORE["payment"]));
+        for job in jobs.iter_mut() {
+            if job.schedule.peek().unwrap() < &now {
+                spawn(job.future.clone());
             }
-        }
-
-        // dog care
-        if let (8, 30) | (15, 30) = (hour, min) {
-            spawn(send(&DOG_CARE["food"]));
-        }
-        if let (11, 0) | (14, 0) | (20, 0) | (23, 0) = (hour, min) {
-            spawn(send(&DOG_CARE["potty"]));
-        }
-        if let (17, 0) = (hour, min) {
-            spawn(send(&DOG_CARE["play"]));
+            while job.schedule.peek().unwrap() < &now {
+                job.schedule.next();
+            }
         }
 
         sleep(Duration::from_secs(60)).await;
