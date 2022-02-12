@@ -4,7 +4,7 @@ extern crate maplit;
 mod commands;
 
 use anyhow::Result;
-use commands::{general::*, smite::*};
+use commands::{general::*, smite::counter::*};
 use serenity::async_trait;
 use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::macros::help;
