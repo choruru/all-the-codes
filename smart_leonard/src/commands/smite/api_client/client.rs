@@ -8,7 +8,7 @@ use reqwest;
 use serde::de::DeserializeOwned;
 use std::env;
 
-use super::external_model::{god::*, match_stat::*, session::*};
+use super::model::{god::*, match_stat::*, session::*};
 
 const BASE_URL: &'static str = "https://api.smitegame.com/smiteapi.svc";
 
@@ -23,7 +23,7 @@ fn get_auth_key() -> String {
 }
 
 #[cached(result = true, time = 890)] // 15 mins - 10 secs
-async fn get_sesssion_id() -> Result<String> {
+pub async fn get_sesssion_id() -> Result<String> {
     Ok(createsession().await?.session_id)
 }
 
